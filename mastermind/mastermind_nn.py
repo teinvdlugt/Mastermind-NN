@@ -1,4 +1,5 @@
 import tensorflow as tf
+import os
 
 
 # The network:
@@ -13,20 +14,18 @@ import tensorflow as tf
 # Output nodes:
 #   - 4 holes, so 6 * 4 = 24 output nodes
 # Hidden layers:
-#   - layer 1: 150 nodes
-#   - layer 2: 150 nodes
+#   - layer 1: 80 nodes
 # Placeholders:
 #   - x:  dimension None x 234 (input)
 #   - y_: dimension None x 4  (correct output, NOT ONE-HOT but arrays of indices.)
 # Parameters:
-#   - weights_1: dimension 234 x 150
-#   - weights_2: dimension 150 x 150
-#   - weights_3: dimension 150 x 24
+#   - weights_1: dimension 234 x 80
+#   - weights_2: dimension 80 x 24
 # Activation functions:
 #   - tanh
 #   - softmax
 # Network propagation:
-#   - x --> *w_1 --> tanh --> *w_2 --> tanh --> *w_3 --> softmax --> = y
+#   - x --> *w_1 --> tanh --> *w_2 --> softmax --> y
 # Cost function:
 #   - cross entropy
 #   - we use the function tf.nn.sparse_softmax_cross_entropy_with_logits because the labels are one-hot.
@@ -35,7 +34,7 @@ import tensorflow as tf
 #
 # TODO
 #   - Add biases?
-#   - Make less complex? 1 hidden layer?
+#   - Hidden layer size tweaken?
 #   - AdaGrad ipv SGD?
 #
 # https://stackoverflow.com/questions/34240703/whats-the-difference-between-softmax-and-softmax-cross-entropy-with-logits
@@ -45,9 +44,6 @@ import tensorflow as tf
 
 class MastermindNN:
     def __init__(self):
-        self.hidden_layer_1 = 256
-        self.hidden_layer_2 = 256
-
         # Placeholders
         self.x = tf.placeholder(tf.float32, shape=[None, 234], name="x")  # Input  TODO dtype tf.int32?
         self.y_ = tf.placeholder(tf.int32, shape=[None, 4], name="y_")  # Correct output (labels)
@@ -60,9 +56,8 @@ class MastermindNN:
         # to shape [4, None] for that.
 
         # Weights
-        self.weights_1 = tf.Variable(tf.random_uniform([234, 150]), name='weights_1')
-        self.weights_2 = tf.Variable(tf.random_uniform([150, 150]), name='weights_2')
-        self.weights_3 = tf.Variable(tf.random_uniform([150, 24]), name='weights_3')
+        self.weights_1 = tf.Variable(tf.random_uniform([234, 80]), name='weights_1')
+        self.weights_2 = tf.Variable(tf.random_uniform([80, 24]), name='weights_2')
 
         # Compute output
         # First compute unprocessed output logits. Dimension of output logits: None x 24
@@ -71,9 +66,8 @@ class MastermindNN:
         #   hidden_layer_2 = tf.tanh(tf.matmul(hidden_layer_1, self.weights_2))
         #   y_logits = tf.matmul(hidden_layer_2, self.weights_3)
         # Compressed version:
-        y_logits = tf.matmul(tf.tanh(tf.matmul(
-            tf.tanh(tf.matmul(self.x, self.weights_1)),
-            self.weights_2)), self.weights_3, name='y_logits')
+        y_logits = tf.matmul(tf.tanh(tf.matmul(self.x, self.weights_1)),
+                             self.weights_2, name='y_logits')
 
         # Split output logits into four classifiers with 6 classes each.
         # y_logits has dimension [None, 24]. Splitting it into four along dimension 1 will give four
@@ -112,10 +106,14 @@ class MastermindNN:
         self.loss = tf.add(self.loss0 + self.loss1 + self.loss2, self.loss3, name='overall_loss')
 
         # Create Optimizer.
-        self.train = tf.train.GradientDescentOptimizer(.1).minimize(self.loss)
+        self.train = tf.train.GradientDescentOptimizer(.2).minimize(self.loss)
 
         # Create summaries for TensorBoard
         self.init_summaries()
+
+        self.global_step = tf.Variable(0, trainable=False)
+
+        self.saver = tf.train.Saver()
 
     # noinspection PyAttributeOutsideInit
     def init_summaries(self):
@@ -133,30 +131,23 @@ class MastermindNN:
             # Weights
             mean1 = tf.reduce_mean(self.weights_1)
             mean2 = tf.reduce_mean(self.weights_2)
-            mean3 = tf.reduce_mean(self.weights_3)
             stddev1 = tf.square(tf.reduce_mean(tf.square(self.weights_1 - mean1)))
             stddev2 = tf.square(tf.reduce_mean(tf.square(self.weights_2 - mean2)))
-            stddev3 = tf.square(tf.reduce_mean(tf.square(self.weights_3 - mean3)))
             max1, min1 = tf.reduce_max(self.weights_1), tf.reduce_min(self.weights_1)
             max2, min2 = tf.reduce_max(self.weights_2), tf.reduce_min(self.weights_2)
-            max3, min3 = tf.reduce_max(self.weights_3), tf.reduce_min(self.weights_3)
             tf.summary.scalar('weights_1 mean', mean1)
             tf.summary.scalar('weights_2 mean', mean2)
-            tf.summary.scalar('weights_3 mean', mean3)
             tf.summary.scalar('weights_1 stddev', stddev1)
             tf.summary.scalar('weights_2 stddev', stddev2)
-            tf.summary.scalar('weights_3 stddev', stddev3)
             tf.summary.scalar('weights_1 max', max1)
             tf.summary.scalar('weights_2 max', max2)
-            tf.summary.scalar('weights_3 max', max3)
             tf.summary.scalar('weights_1 min', min1)
             tf.summary.scalar('weights_2 min', min2)
-            tf.summary.scalar('weights_3 min', min3)
 
             # Merge summaries and create FileWriter
             self.merged_summaries = tf.summary.merge_all()
             self.summary_writer = tf.summary.FileWriter(
-                '/home/teinvdlugt/Documents/AA Studie/Programmeren 1/Practica/Week 7/mastermind_ai/logs',
+                '/home/teinvdlugt/Documents/Computer Science/Machine Learning/Mastermind/logs',
                 tf.get_default_graph())
 
     def predict(self, session, x):
@@ -176,3 +167,17 @@ class MastermindNN:
     def write_summary(self, session, x, y_, global_step, avg_loss):
         summary = session.run(self.merged_summaries, feed_dict={self.x: x, self.y_: y_, self.avg_loss: avg_loss})
         self.summary_writer.add_summary(summary, global_step)
+
+    def restore_or_initialize(self, session, checkpoint_dir):
+        ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+        if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+            print('Restoring variables from', ckpt.model_checkpoint_path)
+            self.saver.restore(session, ckpt.model_checkpoint_path)
+        else:
+            print('No checkpoint found -- initializing variables.')
+            session.run(tf.global_variables_initializer())
+
+    def save(self, session, checkpoint_dir, global_step):
+        print("Saving checkpoint...")
+        self.saver.save(session, os.path.join(checkpoint_dir, 'model.ckpt'), global_step=global_step)
+        print("Checkpoint saved!")

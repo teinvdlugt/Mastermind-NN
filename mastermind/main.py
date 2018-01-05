@@ -8,21 +8,34 @@ def main():
         nn = MastermindNN()
 
         with tf.Session() as session:
-            session.run(tf.global_variables_initializer())
-            train(session, nn, '/home/teinvdlugt/Documents/AA Studie/Programmeren 1'
-                               '/Practica/Week 7/mastermind_ai/data/training_data_100K', 100, 100, 1000000)
+            train(session, nn,
+                  '/home/teinvdlugt/Documents/Computer Science/Machine Learning/'
+                  '/Mastermind/checkpoints/',
+                  '/home/teinvdlugt/Documents/Computer Science/Machine Learning/'
+                  '/Mastermind/data/training_data_100K_inputs.npy',
+                  '/home/teinvdlugt/Documents/Computer Science/Machine Learning/'
+                  '/Mastermind/data/training_data_100K_outputs.npy',
+                  100, 100, 100000, 100000)
 
 
-def train(session, nn, training_data, batch_size, eval_steps, max_steps):
+def train(session, nn, checkpoint_dir, training_data_inputs, training_data_outputs,
+          batch_size, eval_steps, save_steps, max_steps):
+    # Restore the variables of the network
+    nn.restore_or_initialize(session, checkpoint_dir)
+
     # Get the training data
-    inputs = np.load(training_data + '_inputs.npy')
-    outputs = np.load(training_data + '_outputs.npy')
+    print('Getting training data...')
+    inputs = np.load(training_data_inputs)
+    outputs = np.load(training_data_outputs)
     num_data_points = len(inputs)
+
+    # Global step tensor:
+    increment_global_step_op = nn.global_step.assign_add(1)
 
     train_step = 0
     total_loss = 0  # Sum of all losses within single eval period
     last_eval_stap = 0  # number of the last time an eval was done
-    while train_step < max_steps and (train_step + 1) * batch_size < num_data_points:
+    while train_step < max_steps and (train_step + 1) * batch_size <= num_data_points:
         x = inputs[train_step * batch_size: (train_step + 1) * batch_size]
         y_ = outputs[train_step * batch_size: (train_step + 1) * batch_size]
 
@@ -36,12 +49,18 @@ def train(session, nn, training_data, batch_size, eval_steps, max_steps):
                 avg_loss = loss
             else:
                 avg_loss = total_loss / (train_step - last_eval_stap)
-            nn.write_summary(session, x, y_, train_step, avg_loss)
+            nn.write_summary(session, x, y_, nn.global_step.eval(session), avg_loss)
 
             total_loss = 0
             last_eval_stap = train_step
 
+        # Save a checkpoint
+        if (train_step % save_steps == 0 and train_step != 0) or train_step == max_steps - 1:
+            nn.save(session, checkpoint_dir, nn.global_step.eval(session))
+
+        # Increment train step
         train_step += 1
+        session.run(increment_global_step_op)
 
 
 if __name__ == '__main__':
